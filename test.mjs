@@ -20,7 +20,7 @@ while (i < 500) {
     i++;
 }
 console.log("future");
-console.log(reader.getNextTimeChange("TOP.cpu.control_unit.alu_op [3:0]", 105))
+console.log(reader.getNextTimeChange("TOP.cpu.control_unit.alu_op [3:0]", 100))
 console.log(reader.getTimescale())
 console.log(reader.getTimezero())
 console.log(reader.getMetadata())

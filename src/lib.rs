@@ -26,11 +26,17 @@ pub struct FstJsReaderContent {
   enums: HashMap<String, FstEnum>,
 }
 
+
+#[napi(object)]
+pub struct TimeChange {
+  pub time: u32 ,
+  pub value: u32,
+}
+
 #[napi] 
 pub struct FstJsReader {
   content: FstJsReaderContent,
 }
-
 #[napi]
 impl FstJsReader {
   /// Constructor: Create a new FST reader
@@ -107,7 +113,8 @@ impl FstJsReader {
 
     if let Some(handle) = var_handle {
       if let Some(val) = self.content.reader.get_value_from_handle_at_time(time as u64, handle) {
-        return env.create_int32(isize::from_str_radix(&val, 2).unwrap() as i32);
+        let value = u32::from_str_radix(&val, 2).map_err(|_| napi::Error::new(napi::Status::InvalidArg, "Invalid value"))?;
+        return env.create_uint32(value);
       }
     }
     Err(napi::Error::new(napi::Status::InvalidArg, "Not Found"))
@@ -148,29 +155,74 @@ impl FstJsReader {
     env: Env,
     var_name: String,
     start_time: i32,
-  ) -> Result<JsNumber> {
+  ) -> Result<TimeChange> {
     let mut var_handle = None;
 
     for var in self.content.reader.vars() {
       let (name, var) = var.map_err(|e| e.to_napi_error())?;
       if name == var_name {
-        var_handle = Some(var.handle());
-        break;
+      var_handle = Some(var.handle());
+      break;
       }
     }
 
     if let Some(handle) = var_handle {
-      let time = self
-          .content
-          .reader
-          .get_next_time_change(start_time as u64, handle)
-          .map_err(|e| e.to_napi_error())?;
-      return env.create_uint32(time as u32);
+      let mut current_time = start_time as u64;
+      let initial_value = self.content.reader.get_value_from_handle_at_time(current_time, handle).expect("Invalid start time");
+
+      while let Some(next_value) = self.content.reader.get_value_from_handle_at_time(current_time, handle) {
+      if next_value != initial_value {
+        let parsed = u32::from_str_radix(&next_value, 2).map_err(|_| napi::Error::new(napi::Status::InvalidArg, "Invalid value"))?;
+        return Ok(TimeChange {
+        time: current_time as u32,
+        value: parsed,
+        });
+      }
+      current_time += 1;
+      }
     }
     Err(napi::Error::new(napi::Status::InvalidArg, "Not Found"))
   }
+  
+  #[napi]
+  pub fn get_next_value_is_not_base(
+    &mut self,
+    env: Env,
+    var_name: String,
+    start_time: i32,
+    base_value: u32
+  ) -> Result<TimeChange> {
+    let mut var_handle = None;
 
-  /// Get the timescale of the FST file
+    for var in self.content.reader.vars() {
+      let (name, var) = var.map_err(|e| e.to_napi_error())?;
+      if name == var_name {
+      var_handle = Some(var.handle());
+      break;
+      }
+    }
+
+    if let Some(handle) = var_handle {
+      let mut current_time = start_time as u64;
+      let initial_value = u32::from_str_radix(&self.content.reader.get_value_from_handle_at_time(current_time, handle).expect("Invalid start time"), 2).
+      map_err(|_| napi::Error::new(napi::Status::InvalidArg, "Invalid value"))? == base_value;
+
+      while let next_value = u32::from_str_radix(&self.content.reader.get_value_from_handle_at_time(current_time, handle).expect("Invalid start time"), 2).
+      map_err(|_| napi::Error::new(napi::Status::InvalidArg, "Invalid value"))? == base_value {
+      if next_value != initial_value {
+        return Ok(TimeChange {
+        time: current_time as u32,
+        value: next_value as u32,
+        });
+      }
+      current_time += 1;
+      }
+    }
+    Err(napi::Error::new(napi::Status::InvalidArg, "Not Found"))
+  }
+  
+  
+    /// Get the timescale of the FST file
   #[napi]
   pub fn get_timescale(&self, env: Env) -> Result<JsString> {
     let timescale = self.content.reader.timescale_str();
